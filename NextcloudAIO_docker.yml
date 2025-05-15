@@ -1,0 +1,62 @@
+---
+- name: Install Nextcloud AIO via Docker
+  hosts: localhost
+  become: yes
+  vars_prompt:
+    - name: nc_domain
+      prompt: "Voer je domeinnaam in (bijv. cloud.jouwdomein.nl)"
+      private: no
+
+  vars:
+    aio_container_name: nextcloud-aio-mastercontainer
+    aio_image: ghcr.io/nextcloud-releases/all-in-one:latest
+    docker_config_volume: nextcloud_aio_mastercontainer
+    docker_config_mount_path: /mnt/docker-aio-config
+    docker_socket_path: /var/run/docker.sock
+
+  tasks:
+
+    - name: Install dependencies (curl)
+      apt:
+        name: curl
+        state: present
+        update_cache: yes
+
+    - name: Install Docker via official convenience script
+      shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+
+    - name: Ensure Docker is started
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Ensure AIO mastercontainer is not already running
+      docker_container:
+        name: "{{ aio_container_name }}"
+        state: absent
+        force_kill: yes
+      ignore_errors: yes
+
+    - name: Start Nextcloud AIO Mastercontainer
+      docker_container:
+        name: "{{ aio_container_name }}"
+        image: "{{ aio_image }}"
+        state: started
+        restart_policy: always
+        published_ports:
+          - 80:80
+          - 8080:8080
+          - 8443:8443
+        volumes:
+          - "{{ docker_config_volume }}:{{ docker_config_mount_path }}"
+          - "{{ docker_socket_path }}:{{ docker_socket_path }}:ro"
+        command: ""
+        detach: true
+
+    - name: Toon installatielink
+      debug:
+        msg: "Ga naar https://{{ nc_domain }}:8443 om Nextcloud AIO te configureren."
+
