@@ -1,0 +1,22 @@
+- name: OS Plugin
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+    - name: Gather facts for first time
+      setup:
+    - name: Linux Setup
+      when: ansible_os_family == "RedHat" or ansible_os_family == "Debian"
+      include_tasks: tasks/plugin-os-linux.yml
+    - name: Disk format mount V2
+      when: (cloud_type == 'OpenStack' or cloud_type == 'Azure' or cloud_type == 'AWS') and (ansible_distribution == 'CentOS' or ansible_distribution == 'Ubuntu' or ansible_distribution == 'Fedora' or ansible_distribution == 'Rocky') and os_disk_format is defined and (os_disk_format | bool)
+      include_tasks: tasks/plugin-disk-format-mount-v2.yml
+      register: result
+    - name: Disk format mount
+      when: result is skipped and (ansible_distribution == 'CentOS' or ansible_distribution == 'Ubuntu' or ansible_distribution == 'Fedora' or ansible_distribution == 'Rocky') and os_disk_format is defined and (os_disk_format | bool)
+      #result.skipped
+      include_tasks: tasks/plugin-disk-format-mount.yml
+
