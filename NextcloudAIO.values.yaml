@@ -1,0 +1,67 @@
+- name: Genereer Nextcloud .env bestand met secrets en domein
+  hosts: localhost
+  gather_facts: false
+  vars:
+    timezone: "Europe/Berlin"
+    secrets_list:
+      - DATABASE_PASSWORD
+      - FULLTEXTSEARCH_PASSWORD
+      - IMAGINARY_SECRET
+      - NEXTCLOUD_PASSWORD
+      - ONLYOFFICE_SECRET
+      - RECORDING_SECRET
+      - REDIS_PASSWORD
+      - SIGNALING_SECRET
+      - TALK_INTERNAL_SECRET
+      - TURN_SECRET
+      - WHITEBOARD_SECRET
+
+  tasks:
+    - name: Fail als domein niet is meegegeven
+      fail:
+        msg: "Gebruik --extra-vars 'domain=example.com' om een domein op te geven."
+      when: domain is not defined
+
+    - name: Genereer willekeurige secrets
+      set_fact:
+        generated_secrets: >-
+          {{
+            dict(
+              secrets_list | zip(
+                secrets_list | map('password', 32, 'ascii_letters,digits')
+              )
+            )
+          }}
+
+    - name: Standaardconfiguratie instellen
+      set_fact:
+        default_config:
+          NC_DOMAIN: "{{ domain }}"
+          TIMEZONE: "{{ timezone }}"
+          CLAMAV_ENABLED: "no"
+          COLLABORA_ENABLED: "no"
+          FULLTEXTSEARCH_ENABLED: "no"
+          IMAGINARY_ENABLED: "no"
+          ONLYOFFICE_ENABLED: "no"
+          TALK_ENABLED: "no"
+          TALK_RECORDING_ENABLED: "no"
+          WHITEBOARD_ENABLED: "yes"
+          APACHE_MAX_SIZE: "17179869184"
+          APACHE_PORT: 443
+          NEXTCLOUD_UPLOAD_LIMIT: "16G"
+          NEXTCLOUD_MEMORY_LIMIT: "512M"
+          NEXTCLOUD_MAX_TIME: 3600
+          TALK_PORT: 3478
+
+    - name: Combineer alle variabelen
+      set_fact:
+        env_vars: "{{ generated_secrets | combine(default_config) }}"
+
+    - name: Schrijf alle variabelen naar .env bestand
+      copy:
+        dest: ./nextcloud.env
+        mode: '0600'
+        content: |
+          {% for key, value in env_vars.items() %}
+          {{ key }}={{ value }}
+          {% endfor %}
