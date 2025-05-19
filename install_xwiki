@@ -1,3 +1,17 @@
+- name: Voeg lokale host toe aan nextcloud groep
+  hosts: localhost
+  gather_facts: yes
+  tasks:
+    - name: Haal IP-adres op van huidige server
+      debug:
+        var: ansible_default_ipv4.address
+
+    - name: Voeg IP-adres toe aan 'nextcloud' groep
+      add_host:
+        name: "{{ ansible_default_ipv4.address }}"
+        groups: xwiki
+        ansible_user: "{{ ansible_user }}"
+
 - name: Installeer XWiki standalone met HTTPS via Docker en Apache reverse proxy
   hosts: xwiki
   become: true
