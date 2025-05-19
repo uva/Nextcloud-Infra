@@ -1,0 +1,154 @@
+- name: Installeer XWiki standalone met HTTPS via Docker en Apache reverse proxy
+  hosts: xwiki
+  become: true
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: Installeer vereiste pakketten
+      apt:
+        name:
+          - docker.io
+          - apache2
+          - certbot
+          - python3-certbot-apache
+        state: present
+        update_cache: yes
+
+    - name: Start MariaDB container
+      docker_container:
+        name: "{{ mariadb_container_name }}"
+        image: mariadb:10.6
+        restart_policy: always
+        env:
+          MYSQL_ROOT_PASSWORD: "{{ mariadb_root_password }}"
+          MYSQL_DATABASE: "{{ xwiki_db_name }}"
+          MYSQL_USER: "{{ xwiki_db_user }}"
+          MYSQL_PASSWORD: "{{ xwiki_db_password }}"
+        volumes:
+          - mariadb_data:/var/lib/mysql
+        ports:
+          - "3306:3306"
+
+    - name: Start XWiki container
+      docker_container:
+        name: "{{ xwiki_container_name }}"
+        image: xwiki:lts-mysql-tomcat
+        restart_policy: always
+        published_ports:
+          - "127.0.0.1:{{ xwiki_port }}:8080"
+        env:
+          DB_HOST: "{{ mariadb_container_name }}"
+          DB_DATABASE: "{{ xwiki_db_name }}"
+          DB_USER: "{{ xwiki_db_user }}"
+          DB_PASSWORD: "{{ xwiki_db_password }}"
+        links:
+          - "{{ mariadb_container_name }}"
+        volumes:
+          - xwiki_data:/usr/local/xwiki
+
+    - name: Activeer benodigde Apache modules
+      shell: a2enmod proxy proxy_http ssl headers rewrite
+      register: enable_mods
+      changed_when: "'enabled' in enable_mods.stdout"
+
+    - name: Voeg ServerName toe aan apache2.conf om FQDN-waarschuwing te onderdrukken
+      lineinfile:
+        path: /etc/apache2/apache2.conf
+        line: "ServerName localhost"
+        state: present
+        insertafter: BOF
+
+    - name: Deactiveer alle bestaande Apache sites
+      shell: |
+        ls /etc/apache2/sites-enabled/*.conf | xargs -n1 basename | xargs -n1 a2dissite || true
+      changed_when: false
+
+    - name: Genereer tijdelijke Apache HTTP-config voor Certbot
+      copy:
+        dest: /etc/apache2/sites-available/xwiki-temp.conf
+        content: |
+          <VirtualHost *:80>
+              ServerName {{ xwiki_domain }}
+              DocumentRoot /var/www/html
+          </VirtualHost>
+
+    - name: Activeer tijdelijke site voor Certbot
+      shell: a2ensite xwiki-temp
+      register: enable_temp
+      changed_when: "'enabled' in enable_temp.stdout"
+
+    - name: Herstart Apache (alleen HTTP)
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Vraag Let's Encrypt certificaat aan via webroot
+      command: >
+        certbot certonly --webroot
+        --webroot-path /var/www/html
+        --non-interactive --agree-tos
+        -m admin@{{ xwiki_domain }}
+        -d {{ xwiki_domain }}
+      args:
+        creates: /etc/letsencrypt/live/{{ xwiki_domain }}/fullchain.pem
+
+    - name: Deactiveer tijdelijke site
+      shell: a2dissite xwiki-temp
+      register: disable_temp
+      changed_when: "'disabled' in disable_temp.stdout"
+
+    - name: Genereer definitieve Apache VirtualHost met HTTPS
+      copy:
+        dest: /etc/apache2/sites-available/xwiki.conf
+        content: |
+          <VirtualHost *:80>
+              ServerName {{ xwiki_domain }}
+              Redirect / https://{{ xwiki_domain }}/
+          </VirtualHost>
+
+          <IfModule mod_ssl.c>
+          <VirtualHost *:443>
+              ServerName {{ xwiki_domain }}
+
+              ProxyPreserveHost On
+              ProxyPass / http://127.0.0.1:{{ xwiki_port }}/
+              ProxyPassReverse / http://127.0.0.1:{{ xwiki_port }}/
+
+              RequestHeader set X-Forwarded-Proto "https"
+
+              SSLEngine on
+              SSLCertificateFile /etc/letsencrypt/live/{{ xwiki_domain }}/fullchain.pem
+              SSLCertificateKeyFile /etc/letsencrypt/live/{{ xwiki_domain }}/privkey.pem
+          </VirtualHost>
+          </IfModule>
+
+    - name: Activeer definitieve HTTPS site
+      shell: a2ensite xwiki
+      register: enable_site
+      changed_when: "'enabled' in enable_site.stdout"
+
+    - name: Controleer Apache-config correctheid
+      shell: apache2ctl configtest 2>&1
+      register: apache_config
+      changed_when: false
+      failed_when: >
+        (apache_config.rc != 0) or
+        ('Syntax OK' not in apache_config.stdout and 'Syntax OK' not in apache_config.stderr)
+
+    - name: Herstart Apache met HTTPS-config
+      systemd:
+        name: apache2
+        state: restarted
+      when: "'Syntax OK' in apache_config.stdout or 'Syntax OK' in apache_config.stderr"
+
+    - name: Controleer of XWiki bereikbaar is via HTTPS
+      uri:
+        url: "https://{{ xwiki_domain }}"
+        validate_certs: no
+        status_code: 200
+      register: result
+      retries: 10
+      delay: 10
+      until: result.status == 200
