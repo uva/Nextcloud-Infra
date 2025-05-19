@@ -1,0 +1,162 @@
+- name: Volledige Nextcloud-installatie met veilige Apache + Let's Encrypt
+  hosts: nextcloud
+  become: true
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: Installeer benodigde pakketten
+      apt:
+        name:
+          - apache2
+          - mariadb-server
+          - libapache2-mod-php
+          - php
+          - php-mysql
+          - php-xml
+          - php-mbstring
+          - php-curl
+          - php-gd
+          - php-zip
+          - php-intl
+          - php-bcmath
+          - unzip
+          - wget
+          - curl
+          - certbot
+          - python3-certbot-apache
+          - python3-pymysql
+        state: present
+        update_cache: yes
+
+    - name: Start Apache en MariaDB
+      systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - apache2
+        - mariadb
+
+    - name: Maak databasebeheerder aan
+      mysql_user:
+        name: "{{ db_admin_user }}"
+        password: "{{ db_admin_password }}"
+        priv: "*.*:ALL,GRANT"
+        host: localhost
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Maak Nextcloud database aan
+      mysql_db:
+        name: "{{ nextcloud_db }}"
+        state: present
+        login_user: "{{ db_admin_user }}"
+        login_password: "{{ db_admin_password }}"
+        login_host: localhost
+
+    - name: Maak Nextcloud databasegebruiker aan
+      mysql_user:
+        name: "{{ nextcloud_db_user }}"
+        password: "{{ nextcloud_db_password }}"
+        priv: "{{ nextcloud_db }}.*:ALL"
+        host: localhost
+        state: present
+        login_user: "{{ db_admin_user }}"
+        login_password: "{{ db_admin_password }}"
+        login_host: localhost
+
+    - name: Download Nextcloud
+      get_url:
+        url: https://download.nextcloud.com/server/releases/latest.zip
+        dest: /tmp/nextcloud.zip
+
+    - name: Pak Nextcloud uit
+      unarchive:
+        src: /tmp/nextcloud.zip
+        dest: /var/www/
+        remote_src: yes
+        creates: /var/www/nextcloud
+
+    - name: Zet juiste rechten
+      file:
+        path: /var/www/nextcloud
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Voeg globale ServerName toe aan apache2.conf
+      lineinfile:
+        path: /etc/apache2/apache2.conf
+        line: "ServerName {{ nextcloud_domain }}"
+        insertafter: BOF
+
+    - name: Maak Apache HTTP VirtualHost (geen SSL vooraf)
+      copy:
+        dest: /etc/apache2/sites-available/nextcloud.conf
+        content: |
+          <VirtualHost *:80>
+              ServerName {{ nextcloud_domain }}
+              DocumentRoot /var/www/nextcloud
+
+              <Directory /var/www/nextcloud>
+                  Require all granted
+                  AllowOverride All
+                  Options FollowSymLinks MultiViews
+              </Directory>
+          </VirtualHost>
+
+    - name: Activeer Apache-modules
+      shell: a2enmod rewrite headers env dir mime
+      register: apache_mods
+      changed_when: "'enabled' in apache_mods.stdout"
+
+    - name: Activeer Apache-site nextcloud
+      shell: a2ensite nextcloud
+      register: site_enabled
+      changed_when: "'enabled' in site_enabled.stdout"
+
+    - name: Deactiveer Apache default-site
+      shell: a2dissite 000-default
+      register: default_disabled
+      changed_when: "'disabled' in default_disabled.stdout"
+
+    - name: Valideer Apache-configuratie (negeer waarschuwingen)
+      shell: apache2ctl configtest 2>&1
+      register: apache_config
+      failed_when: apache_config.rc != 0 or ('Syntax OK' not in apache_config.stdout and 'Syntax OK' not in apache_config.stderr)
+      changed_when: false
+
+    - name: Herstart Apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Vraag Let's Encrypt-certificaat aan (voegt automatisch HTTPS toe)
+      command: >
+        certbot --apache --non-interactive --agree-tos
+        --redirect
+        -m admin@{{ nextcloud_domain }}
+        -d {{ nextcloud_domain }}
+      args:
+        creates: /etc/letsencrypt/live/{{ nextcloud_domain }}/fullchain.pem
+
+    - name: Installeer Nextcloud via OCC
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ maintenance:install
+        --database "mysql"
+        --database-name "{{ nextcloud_db }}"
+        --database-user "{{ nextcloud_db_user }}"
+        --database-pass "{{ nextcloud_db_password }}"
+        --admin-user "{{ nextcloud_admin_user }}"
+        --admin-pass "{{ nextcloud_admin_password }}"
+      args:
+        creates: /var/www/nextcloud/config/config.php
+        chdir: /var/www/nextcloud
+
+    - name: Voeg domein toe aan trusted_domains
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ config:system:set trusted_domains 1
+        --value="{{ nextcloud_domain }}"
+      args:
+        chdir: /var/www/nextcloud
