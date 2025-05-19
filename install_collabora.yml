@@ -20,7 +20,6 @@
     nginx_ssl_cert_path: "/etc/letsencrypt/live/{{ collabora_public_url }}/fullchain.pem"
     nginx_ssl_key_path: "/etc/letsencrypt/live/{{ collabora_public_url }}/privkey.pem"
     collabora_jail_path: "/opt/collabora/jails"
-    ansible_python_interpreter: /usr/bin/python3
 
   tasks:
     - name: Installeer benodigde pakketten
@@ -100,7 +99,7 @@
 
     - name: Verkrijg Let's Encrypt certificaat via Certbot
       command: >
-        certbot certonly --webroot -w /var/www/html -n --agree-tos --email {{ email_for_ssl }} -d {{ collabora_public_url }}
+        certbot certonly --webroot -w /var/www/html -n --agree-tos --email admin@{{ collabora_public_url }} -d {{ collabora_public_url }}
       args:
         creates: "{{ nginx_ssl_cert_path }}"
       notify: Reload nginx
