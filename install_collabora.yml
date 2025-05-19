@@ -1,0 +1,137 @@
+- name: Installeer en configureer Collabora Online met Nginx, SSL en werkende jail path
+  hosts: collabora
+  become: true
+
+  vars:
+    nginx_ssl_cert_path: "/etc/letsencrypt/live/{{ collabora_public_url }}/fullchain.pem"
+    nginx_ssl_key_path: "/etc/letsencrypt/live/{{ collabora_public_url }}/privkey.pem"
+    collabora_jail_path: "/opt/collabora/jails"
+
+  tasks:
+    - name: Installeer benodigde pakketten
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: yes
+
+    - name: Zorg dat Docker actief is
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Maak jail-directory aan met juiste permissies voor Collabora
+      file:
+        path: "{{ collabora_jail_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0777'  # WORLD WRITABLE (alleen binnen container gebruikt)
+
+    - name: Start of update Collabora container
+      docker_container:
+        name: collabora
+        image: "collabora/code:latest"
+        pull: true
+        state: started
+        recreate: true
+        restart_policy: always
+        published_ports:
+          - "127.0.0.1:{{ collabora_port }}:9980"
+        volumes:
+          - "{{ collabora_jail_path }}:{{ collabora_jail_path }}"
+        env:
+          domain: "{{ collabora_domain | regex_replace('\\.', '\\\\.') }}"
+          username: "{{ collabora_username }}"
+          password: "{{ collabora_password }}"
+          extra_params: --o:ssl.enable=false --o:ssl.termination=true
+
+    - name: Maak tijdelijke Nginx-configuratie voor Certbot
+      copy:
+        dest: /etc/nginx/sites-available/collabora
+        content: |
+          server {
+              listen 80;
+              server_name {{ collabora_public_url }};
+
+              location /.well-known/acme-challenge/ {
+                  root /var/www/html;
+              }
+
+              location / {
+                  return 301 https://$host$request_uri;
+              }
+          }
+      notify: Reload nginx
+
+    - name: Activeer Nginx-site
+      file:
+        src: /etc/nginx/sites-available/collabora
+        dest: /etc/nginx/sites-enabled/collabora
+        state: link
+        force: yes
+      notify: Reload nginx
+
+    - name: Zorg dat Nginx actief is
+      systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    - name: Verkrijg Let's Encrypt certificaat via Certbot
+      command: >
+        certbot certonly --webroot -w /var/www/html -n --agree-tos --email {{ email_for_ssl }} -d {{ collabora_public_url }}
+      args:
+        creates: "{{ nginx_ssl_cert_path }}"
+      notify: Reload nginx
+
+    - name: Maak definitieve Nginx-configuratie met SSL voor Collabora aan
+      copy:
+        dest: /etc/nginx/sites-available/collabora
+        content: |
+          server {
+              listen 80;
+              server_name {{ collabora_public_url }};
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name {{ collabora_public_url }};
+
+              ssl_certificate {{ nginx_ssl_cert_path }};
+              ssl_certificate_key {{ nginx_ssl_key_path }};
+
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers HIGH:!aNULL:!MD5;
+              ssl_prefer_server_ciphers on;
+
+              location / {
+                  proxy_pass       http://127.0.0.1:{{ collabora_port }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+              }
+          }
+      notify: Reload nginx
+
+    - name: Verwijder default-site indien actief
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: Reload nginx
+
+  handlers:
+    - name: Reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
