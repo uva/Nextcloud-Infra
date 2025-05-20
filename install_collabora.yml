@@ -50,7 +50,7 @@
     - name: Start of update Collabora container
       docker_container:
         name: collabora
-        image: "collabora/code:latest"
+        image: "collabora/code:stable"
         pull: true
         state: started
         recreate: true
