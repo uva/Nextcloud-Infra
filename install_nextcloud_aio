@@ -92,7 +92,7 @@
         certbot certonly --webroot
         -w {{ webroot_path }}
         --non-interactive --agree-tos
-        --email {{ email }}
+        --email admin@{{ domain }}
         -d {{ domain }}
       args:
         creates: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"
