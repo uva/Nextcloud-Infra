@@ -111,7 +111,7 @@
       args:
         creates: "/etc/letsencrypt/live/{{ domain }}/fullchain.pem"
 
-    - name: Genereer definitieve NGINX-config met SSL
+    - name: Genereer definitieve NGINX-config met SSL en Collabora proxy
       copy:
         dest: /etc/nginx/sites-available/nextcloud-aio
         content: |
@@ -130,6 +130,7 @@
               ssl_certificate /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
               ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
 
+              # Nextcloud AIO
               location / {
                   proxy_pass http://127.0.0.1:11000;
                   proxy_ssl_verify off;
@@ -140,8 +141,38 @@
                   proxy_set_header X-Forwarded-Proto https;
               }
 
+              # Certbot
               location /.well-known/acme-challenge/ {
                   root {{ webroot_path }};
+              }
+
+              # Collabora Online (CODE/COOL) Proxy settings
+              location ^~ /loleaflet {
+                  proxy_pass https://127.0.0.1:9980;
+                  proxy_set_header Host $host;
+              }
+
+              location ^~ /hosting/discovery {
+                  proxy_pass https://127.0.0.1:9980;
+                  proxy_set_header Host $host;
+              }
+
+              location ^~ /lool {
+                  proxy_pass https://127.0.0.1:9980;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto https;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_http_version 1.1;
+                  proxy_read_timeout 3600s;
+                  proxy_connect_timeout 3600s;
+                  proxy_send_timeout 3600s;
+              }
+
+              location ^~ /browser {
+                  proxy_pass https://127.0.0.1:9980;
+                  proxy_set_header Host $host;
               }
           }
 
