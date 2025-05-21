@@ -19,8 +19,8 @@
   vars:
     version: 1.23.0
     signaling_version: 2.0.3
-    domeinnaam: "{{ nextcloud_domain }}"
-    domein_nextcloud: "{{ nextcloud_domain_1 }}"
+    domeinnaam: "{{ HPB_url }}"
+    domein_nextcloud: "{{ nextcloud_domain }}"
     apache_site_conf: /etc/apache2/sites-available/signaling.conf
 # Automatisch gegenereerde secrets
     turn_rest_api_key: "{{ lookup('password', '/dev/null chars=hexdigits length=32') }}"
