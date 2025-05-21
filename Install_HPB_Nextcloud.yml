@@ -506,6 +506,11 @@
         name: signaling
         enabled: yes
         state: started
+
+    - name: Herstart coturn
+      systemd:
+        name: coturn
+        state: restarted
     
     - name: Installeer Apache en Certbot
       apt:
@@ -617,3 +622,4 @@
       service:
         name: apache2
         state: restarted
+    
