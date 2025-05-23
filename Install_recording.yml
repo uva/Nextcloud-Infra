@@ -1,0 +1,124 @@
+- name: Installeer Firefox, Geckodriver en Talk Recording omgeving
+  hosts: all
+  become: true
+  vars:
+    nextcloud_domain: "{{ nextcloud_domain }}"
+    nextcloud_secret: "{{ nextcloud_secret }}"
+    signaling_domain: "{{ signaling_domain }}"
+    signaling_secret: "{{ signaling_secret }}"
+    recording_dir: "/opt/recording"
+
+  tasks:
+    - name: Installeer vereiste pakketten
+      apt:
+        name:
+          - libgtk-3-0
+          - libdbus-glib-1-2
+          - libpulse0
+          - pulseaudio
+          - xvfb
+          - ffmpeg
+          - python3.10-venv
+        state: present
+        update_cache: yes
+
+    - name: Download Firefox
+      get_url:
+        url: "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US"
+        dest: /opt/firefox.tar.xz
+
+    - name: Pak Firefox uit
+      unarchive:
+        src: /opt/firefox.tar.xz
+        dest: /opt/
+        remote_src: yes
+
+    - name: Maak symlink voor Firefox
+      file:
+        src: /opt/firefox/firefox
+        dest: /usr/local/bin/firefox
+        state: link
+        force: true
+
+    - name: Download Geckodriver
+      get_url:
+        url: https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz
+        dest: /usr/local/bin/geckodriver.tar.gz
+
+    - name: Pak Geckodriver uit
+      unarchive:
+        src: /usr/local/bin/geckodriver.tar.gz
+        dest: /usr/local/bin/
+        remote_src: yes
+
+    - name: Verwijder Geckodriver archive
+      file:
+        path: /usr/local/bin/geckodriver.tar.gz
+        state: absent
+
+    - name: Maak recording directory aan
+      file:
+        path: "{{ recording_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Maak Python virtuele omgeving aan in recording map
+      shell: python3 -m venv venv
+      args:
+        chdir: "{{ recording_dir }}"
+        creates: "{{ recording_dir }}/venv/bin/activate"
+
+    - name: Activeer venv en installeer nextcloud-talk-recording
+      shell: |
+        source venv/bin/activate
+        pip install file://$(pwd)/nextcloud-talk-recording
+      args:
+        chdir: "{{ recording_dir }}"
+
+    - name: Maak server.conf bestand aan
+      copy:
+        dest: "{{ recording_dir }}/server.conf"
+        content: |
+          [logs]
+          level = 20
+
+          [http]
+          listen = 0.0.0.0:8000
+
+          [app]
+          trustedproxies =
+
+          [backend]
+          backends = backend-1
+
+          [backend-1]
+          url = {{ nextcloud_domain }}
+          secret = {{ nextcloud_secret }}
+          allowall = false
+          skipverify = false
+          maxmessagesize = 1024
+          videowidth = 1920
+          videoheight = 1080
+          directory = /tmp
+
+          [signaling]
+          url = {{ signaling_domain }}
+          internalsecret = {{ signaling_secret }}
+
+          [ffmpeg]
+          common = ffmpeg -loglevel level+warning -n -thread_queue_size 1024
+          outputaudio = -c:a libopus
+          outputvideo = -c:v libvpx -deadline:v realtime -crf 10 -b:v 1M
+          extensionaudio = .ogg
+          extensionvideo = .webm
+
+          [recording]
+          browser = firefox
+
+          [stats]
+          allowed_ips =
+
+    - name: Start recording server in background met nohup
+      shell: nohup {{ recording_dir }}/venv/bin/python3 -m nextcloud.talk.recording > output.log 2>&1 &
+      args:
+        chdir: "{{ recording_dir }}"
