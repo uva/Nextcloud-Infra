@@ -338,6 +338,15 @@
         sudo -u www-data php /var/www/nextcloud/occ config:system:set memcache.locking --value="\\OC\\Memcache\\Redis" --type=string
       args:
         chdir: /var/www/nextcloud
+    - name: Repareer ontbrekende theming-cachebestanden
+      shell: sudo -u www-data php /var/www/nextcloud/occ maintenance:repair
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Registreer theming-app expliciet opnieuw
+      shell: sudo -u www-data php /var/www/nextcloud/occ app:enable theming
+      args:
+        chdir: /var/www/nextcloud
 
   handlers:
     - name: Herstart Apache
