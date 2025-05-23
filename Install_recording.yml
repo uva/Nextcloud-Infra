@@ -97,33 +97,33 @@
 
     - name: Maak de map recording aan
       ansible.builtin.file:
-        path: /opt/recording
+        path: /home/ubuntu/recording
         state: directory
       become: yes
-
+    
     - name: Clone nextcloud-talk-recording repository
       ansible.builtin.git:
         repo: https://github.com/nextcloud/nextcloud-talk-recording.git
-        dest: /opt/recording/nextcloud-talk-recording
+        dest: /home/ubuntu/recording/nextcloud-talk-recording
       become: yes
 
     - name: Installeer een virtuele omgeving in map recording
       ansible.builtin.command:
         cmd: python3 -m venv venv
-        chdir: /opt/recording
+        chdir: /home/ubuntu/recording
       become: yes
 
     - name: Activeer de virtuele omgeving en installeer nextcloud-talk-recording
       ansible.builtin.shell: |
-        source /opt/recording/venv/bin/activate
-        pip install file:///opt/recording/nextcloud-talk-recording
+        source /home/ubuntu/recording/venv/bin/activate
+        pip install file:///home/ubuntu/recording/nextcloud-talk-recording
       args:
         executable: /bin/bash
       become: yes
 
     - name: Maak de server.conf aan
       ansible.builtin.copy:
-        dest: /opt/recording/server.conf
+        dest: /home/ubuntu/recording/server.conf
         content: |
           [logs]
           level = 20
@@ -158,8 +158,8 @@
 
     - name: Laat de service altijd draaien
       ansible.builtin.shell: |
-        source /opt/recording/venv/bin/activate
-        nohup python3 -m nextcloud.talk.recording > /opt/recording/output.log 2>&1 &
+        source /home/ubuntu/recording/venv/bin/activate
+        nohup python3 -m nextcloud.talk.recording > /home/ubuntu/recording/output.log 2>&1 &
       args:
         executable: /bin/bash
       become: yes
