@@ -1,97 +1,129 @@
-- name: Installeer Firefox, Geckodriver en Talk Recording omgeving
+---
+- name: Playbook om Firefox, Geckodriver en andere tools te installeren
   hosts: localhost
-  become: true
-  connection: local
+  become: yes
   vars:
     nextcloud_domain: "{{ nextcloud_domain }}"
     nextcloud_secret: "{{ nextcloud_secret }}"
     signaling_domain: "{{ signaling_domain }}"
     signaling_secret: "{{ signaling_secret }}"
-    recording_dir: "/opt/recording"
-    
+
   tasks:
-    - name: Installeer vereiste pakketten
-      apt:
-        name:
-          - libgtk-3-0
-          - libdbus-glib-1-2
-          - libpulse0
-          - pulseaudio
-          - xvfb
-          - ffmpeg
-          - python3.10-venv
-        state: present
-        update_cache: yes
 
-    - name: Download Firefox
-      get_url:
-        url: "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US"
-        dest: /opt/firefox.tar.xz
+    - name: Download en extract Firefox naar /opt
+      ansible.builtin.command:  
+        cmd: 'wget -O firefox.tar.xz https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US'
+        chdir: /opt
+      args:
+        creates: /opt/firefox
+      become: yes
 
-    - name: Pak Firefox uit
+    - name: Extract Firefox
       unarchive:
         src: /opt/firefox.tar.xz
-        dest: /opt/
+        dest: /opt
         remote_src: yes
 
-    - name: Maak symlink voor Firefox
-      file:
+    - name: Maak een symlink voor Firefox
+      ansible.builtin.file:
         src: /opt/firefox/firefox
         dest: /usr/local/bin/firefox
         state: link
-        force: true
+      become: yes
 
-    - name: Download Geckodriver
-      get_url:
-        url: https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz
-        dest: /usr/local/bin/geckodriver.tar.gz
+    - name: Installeer benodigde GTK bibliotheken
+      apt:
+        update_cache: yes
+        name:
+          - libgtk-3-0
+          - libdbus-glib-1-2
+      become: yes
 
-    - name: Pak Geckodriver uit
+    - name: Download en extract Geckodriver naar /usr/local/bin
+      ansible.builtin.command:
+        cmd: 'wget https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz'
+        chdir: /usr/local/bin
+      args:
+        creates: /usr/local/bin/geckodriver
+      become: yes
+
+    - name: Extract Geckodriver
       unarchive:
-        src: /usr/local/bin/geckodriver.tar.gz
-        dest: /usr/local/bin/
+        src: /usr/local/bin/geckodriver-v0.36.0-linux64.tar.gz
+        dest: /usr/local/bin
         remote_src: yes
 
-    - name: Verwijder Geckodriver archive
+    - name: Maak Geckodriver executable
       file:
-        path: /usr/local/bin/geckodriver.tar.gz
-        state: absent
-
-    - name: Maak recording directory aan
-      file:
-        path: "{{ recording_dir }}"
-        state: directory
+        path: /usr/local/bin/geckodriver
         mode: '0755'
+      become: yes
 
-    - name: Maak Python virtuele omgeving aan in recording map
-      shell: python3 -m venv venv
-      args:
-        chdir: "{{ recording_dir }}"
-        creates: "{{ recording_dir }}/venv/bin/activate"
+    - name: Verwijder Geckodriver tar.gz
+      ansible.builtin.file:
+        path: /usr/local/bin/geckodriver-v0.36.0-linux64.tar.gz
+        state: absent
+      become: yes
 
-    - name: Activeer venv en installeer nextcloud-talk-recording
-      shell: |
-        source venv/bin/activate
-        pip install file://$(pwd)/nextcloud-talk-recording
-      args:
-        chdir: "{{ recording_dir }}"
+    - name: Installeer python3.10-venv
+      apt:
+        update_cache: yes
+        name: python3.10-venv
+      become: yes
 
-    - name: Maak server.conf bestand aan
-      copy:
-        dest: "{{ recording_dir }}/server.conf"
+    - name: Installeer libpulse0
+      apt:
+        update_cache: yes
+        name: libpulse0
+      become: yes
+
+    - name: Installeer pulseaudio
+      apt:
+        update_cache: yes
+        name: pulseaudio
+      become: yes
+
+    - name: Installeer xvfb
+      apt:
+        update_cache: yes
+        name: xvfb
+      become: yes
+
+    - name: Installeer ffmpeg
+      apt:
+        update_cache: yes
+        name: ffmpeg
+      become: yes
+
+    - name: Maak de map recording aan
+      ansible.builtin.file:
+        path: /opt/recording
+        state: directory
+      become: yes
+
+    - name: Installeer een virtuele omgeving in map recording
+      ansible.builtin.command:
+        cmd: python3 -m venv venv
+        chdir: /opt/recording
+      become: yes
+
+    - name: Activeer de virtuele omgeving en installeer nextcloud-talk-recording
+      ansible.builtin.shell: |
+        source /opt/recording/venv/bin/activate
+        pip install file:///opt/recording/nextcloud-talk-recording
+
+    - name: Maak de server.conf aan
+      ansible.builtin.copy:
+        dest: /opt/recording/server.conf
         content: |
           [logs]
           level = 20
-
           [http]
           listen = 0.0.0.0:8000
-
           [app]
           trustedproxies =
-
           [backend]
           backends = backend-1
-
           [backend-1]
           url = {{ nextcloud_domain }}
           secret = {{ nextcloud_secret }}
@@ -101,25 +133,22 @@
           videowidth = 1920
           videoheight = 1080
           directory = /tmp
-
           [signaling]
           url = {{ signaling_domain }}
           internalsecret = {{ signaling_secret }}
-
           [ffmpeg]
           common = ffmpeg -loglevel level+warning -n -thread_queue_size 1024
           outputaudio = -c:a libopus
           outputvideo = -c:v libvpx -deadline:v realtime -crf 10 -b:v 1M
           extensionaudio = .ogg
           extensionvideo = .webm
-
           [recording]
           browser = firefox
-
           [stats]
           allowed_ips =
 
-    - name: Start recording server in background met nohup
-      shell: nohup {{ recording_dir }}/venv/bin/python3 -m nextcloud.talk.recording > output.log 2>&1 &
-      args:
-        chdir: "{{ recording_dir }}"
+    - name: Laat de service altijd draaien
+      ansible.builtin.shell: |
+        source /opt/recording/venv/bin/activate
+        nohup python3 -m nextcloud.talk.recording > /opt/recording/output.log 2>&1 &
+      become: yes
