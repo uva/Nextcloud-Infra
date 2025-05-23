@@ -1,13 +1,14 @@
 - name: Installeer Firefox, Geckodriver en Talk Recording omgeving
-  hosts: all
+  hosts: localhost
   become: true
+  connection: local
   vars:
     nextcloud_domain: "{{ nextcloud_domain }}"
     nextcloud_secret: "{{ nextcloud_secret }}"
     signaling_domain: "{{ signaling_domain }}"
     signaling_secret: "{{ signaling_secret }}"
     recording_dir: "/opt/recording"
-
+    
   tasks:
     - name: Installeer vereiste pakketten
       apt:
