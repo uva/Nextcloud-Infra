@@ -8,10 +8,10 @@
     geckodriver_url: "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
     recording_dir: "/opt/recording"
     server_conf_path: "/opt/recording/server.conf"
-    nextcloud_domain: "<DOMEIN NEXTCLOUD>"  # Vul hier je domein in
-    nextcloud_secret: "<SECRET VOOR VERBINDING NEXTCLOUD>"  # Vul hier je secret in
-    signaling_url: "https://uva-nc-test.westeurope.cloudapp.azure.com/standalone-signaling"
-    signaling_internal_secret: "<INTERNAL SECRET EERDER GEMAAKT VOOR SIGNALING SERVER>"
+    nextcloud_domain: "{{ nextcloud_domain }}"
+    nextcloud_secret: "{{ nextcloud_secret }}"
+    signaling_url: "{{ signaling_domain }}"
+    signaling_internal_secret: "{{ signaling_secret }}"
 
   tasks:
 
