@@ -101,6 +101,12 @@
         state: directory
       become: yes
 
+    - name: Clone nextcloud-talk-recording repository
+      ansible.builtin.git:
+        repo: https://github.com/nextcloud/nextcloud-talk-recording.git
+        dest: /opt/recording/nextcloud-talk-recording
+      become: yes
+
     - name: Installeer een virtuele omgeving in map recording
       ansible.builtin.command:
         cmd: python3 -m venv venv
@@ -111,6 +117,9 @@
       ansible.builtin.shell: |
         source /opt/recording/venv/bin/activate
         pip install file:///opt/recording/nextcloud-talk-recording
+      args:
+        executable: /bin/bash
+      become: yes
 
     - name: Maak de server.conf aan
       ansible.builtin.copy:
@@ -151,4 +160,6 @@
       ansible.builtin.shell: |
         source /opt/recording/venv/bin/activate
         nohup python3 -m nextcloud.talk.recording > /opt/recording/output.log 2>&1 &
+      args:
+        executable: /bin/bash
       become: yes
