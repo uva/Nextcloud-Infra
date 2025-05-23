@@ -19,12 +19,17 @@
     ansible_python_interpreter: /usr/bin/python3
 
   tasks:
+    - name: Voeg ondubbelzinnig de laatste stabiele PHP PPA toe (voor recentste versies)
+      apt_repository:
+        repo: ppa:ondrej/php
+        state: present
+        update_cache: yes
+
     - name: Installeer benodigde pakketten
       apt:
         name:
           - apache2
           - mariadb-server
-          - libapache2-mod-php
           - php
           - php-mysql
           - php-xml
@@ -34,6 +39,8 @@
           - php-zip
           - php-intl
           - php-bcmath
+          - php-gmp  
+          - libapache2-mod-php
           - unzip
           - wget
           - curl
@@ -42,6 +49,33 @@
           - python3-pymysql
         state: present
         update_cache: yes
+
+    - name: Detecteer actieve PHP-versie
+      shell: php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;'
+      register: detected_php_version
+      retries: 5
+      delay: 3
+      until: detected_php_version.rc == 0
+      changed_when: false
+
+    - name: Zet gedetecteerde PHP-versie als fact
+      set_fact:
+        php_version: "{{ detected_php_version.stdout }}"
+
+    - name: Verhoog PHP-geheugenlimiet naar 512 MB
+      lineinfile:
+        path: "/etc/php/{{ php_version }}/apache2/php.ini"
+        regexp: '^memory_limit\s*='
+        line: 'memory_limit = 512M'
+        backup: yes
+
+    - name: Verhoog OPcache interned_strings_buffer naar aanbevolen waarde
+      lineinfile:
+        path: "/etc/php/{{ php_version }}/apache2/php.ini"
+        regexp: '^opcache\.interned_strings_buffer\s*='
+        line: 'opcache.interned_strings_buffer = 16'
+        insertafter: EOF
+        backup: yes
 
     - name: Start Apache en MariaDB
       systemd:
@@ -155,6 +189,16 @@
       args:
         creates: /etc/letsencrypt/live/{{ nextcloud_domain }}/fullchain.pem
 
+    - name: Voeg Strict-Transport-Security header toe voor HSTS
+      blockinfile:
+        path: "/etc/apache2/sites-available/nextcloud-le-ssl.conf"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK FOR HSTS"
+        block: |
+          <IfModule mod_headers.c>
+              Header always set Strict-Transport-Security "max-age=15552000; includeSubDomains; preload"
+          </IfModule>
+      notify: Herstart Apache
+
     - name: Installeer Nextcloud via OCC
       shell: >
         sudo -u www-data php /var/www/nextcloud/occ maintenance:install
@@ -174,3 +218,135 @@
         --value="{{ nextcloud_domain }}"
       args:
         chdir: /var/www/nextcloud
+
+    - name: Voer mimetype migraties uit via occ
+      shell: sudo -u www-data php /var/www/nextcloud/occ maintenance:repair --include-expensive
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Stel Nextcloud in om cron als achtergrondproces te gebruiken
+      shell: sudo -u www-data php /var/www/nextcloud/occ background:cron
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Voeg cronjob toe voor Nextcloud background jobs (elke 5 minuten)
+      cron:
+        name: "Nextcloud background jobs"
+        user: www-data
+        minute: "*/5"
+        job: "php -f /var/www/nextcloud/cron.php"
+
+    - name: Voeg cronjob toe voor Nextcloud logrotatie (dagelijks)
+      cron:
+        name: "Nextcloud logrotate"
+        user: www-data
+        minute: "0"
+        hour: "2"
+        job: "php /var/www/nextcloud/occ log:manage --shrink --days=14"
+        cron_file: nextcloud_logrotate
+
+    - name: Voeg cronjob toe voor OCC onderhoud (elke zondag)
+      cron:
+        name: "Nextcloud DB onderhoud (repair + files:scan-app-data)"
+        user: www-data
+        minute: "30"
+        hour: "3"
+        weekday: "0"
+        job: "php /var/www/nextcloud/occ maintenance:repair && php /var/www/nextcloud/occ files:scan-app-data"
+        cron_file: nextcloud_maintenance
+
+    - name: Voeg cronjob toe voor mimetype repair (1× per week)
+      cron:
+        name: "Nextcloud mimetype repair"
+        user: www-data
+        minute: "0"
+        hour: "4"
+        weekday: "0"
+        job: "php /var/www/nextcloud/occ maintenance:repair --include-expensive"
+        cron_file: nextcloud_mimetype_repair
+
+    - name: Stel onderhoudsvenster in op 03:00 (Nextcloud background tasks)
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ config:system:set maintenance_window_start --value="3"
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Stel standaard telefoonregio in (bijv. NL)
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ config:system:set default_phone_region --value="NL"
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Controleer of het php.ini-bestand bestaat
+      stat:
+        path: "/etc/php/{{ php_version }}/apache2/php.ini"
+      register: php_ini_stat
+
+    - name: Maak php.ini aan als het nog niet bestaat
+      copy:
+        dest: "/etc/php/{{ php_version }}/apache2/php.ini"
+        content: ""
+      when: not php_ini_stat.stat.exists
+
+    - name: Installeer php{{ php_version }}-apcu voor memcache
+      apt:
+        name: "php{{ php_version }}-apcu"
+        state: present
+        update_cache: yes
+      notify: Herstart Apache
+    
+    - name: Installeer php{{ php_version }}-redis
+      apt:
+        name:
+          - "php{{ php_version }}-redis"
+        state: present
+        update_cache: yes
+      notify: Herstart Apache
+
+    - name: Installeer Redis-server
+      apt:
+        name: redis-server
+        state: present
+        update_cache: yes
+      notify: Herstart Redis
+
+    - name: Installeer php-imagick extensie
+      apt:
+        name: php-imagick
+        state: present
+        update_cache: yes
+      notify: Herstart Apache
+  
+    - name: Installeer ImageMagick en SVG-ondersteuning
+      apt:
+        name:
+          - imagemagick
+          - librsvg2-2
+          - librsvg2-bin
+        state: present
+        update_cache: yes
+      notify: Herstart Apache
+
+    - name: Stel memcache in (APCu) voor Nextcloud
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ config:system:set memcache.local --value="\\OC\\Memcache\\APCu" --type=string
+      args:
+        chdir: /var/www/nextcloud
+
+    - name: Stel memcache locking in (Redis) voor Nextcloud
+      shell: >
+        sudo -u www-data php /var/www/nextcloud/occ config:system:set memcache.locking --value="\\OC\\Memcache\\Redis" --type=string
+      args:
+        chdir: /var/www/nextcloud
+
+  handlers:
+    - name: Herstart Apache
+      systemd:
+        name: apache2
+        state: restarted
+
+    - name: Herstart Redis
+      systemd:
+        name: redis-server
+        enabled: true
+        state: restarted
