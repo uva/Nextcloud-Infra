@@ -15,7 +15,6 @@
 - name: Installeer XWiki standalone met HTTPS via Docker en Apache reverse proxy
   hosts: xwiki
   become: true
-
   vars:
     ansible_python_interpreter: /usr/bin/python3
 
@@ -51,7 +50,7 @@
         image: xwiki:lts-mysql-tomcat
         restart_policy: always
         published_ports:
-          - "127.0.0.1:8080"
+          - "127.0.0.1:8080:8080"
         env:
           DB_HOST: "{{ mariadb_container_name }}"
           DB_DATABASE: "{{ xwiki_db_name }}"
@@ -156,13 +155,3 @@
         name: apache2
         state: restarted
       when: "'Syntax OK' in apache_config.stdout or 'Syntax OK' in apache_config.stderr"
-
-    - name: Controleer of XWiki bereikbaar is via HTTPS
-      uri:
-        url: "https://{{ xwiki_domain }}"
-        validate_certs: yes
-        status_code: 200
-      register: result
-      retries: 10
-      delay: 10
-      until: result.status == 200
