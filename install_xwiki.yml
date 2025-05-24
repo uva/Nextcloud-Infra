@@ -51,7 +51,7 @@
         image: xwiki:lts-mysql-tomcat
         restart_policy: always
         published_ports:
-          - "127.0.0.1:{{ xwiki_port }}:8080"
+          - "127.0.0.1:8080"
         env:
           DB_HOST: "{{ mariadb_container_name }}"
           DB_DATABASE: "{{ xwiki_db_name }}"
@@ -127,8 +127,8 @@
               ServerName {{ xwiki_domain }}
 
               ProxyPreserveHost On
-              ProxyPass / http://127.0.0.1:{{ xwiki_port }}/
-              ProxyPassReverse / http://127.0.0.1:{{ xwiki_port }}/
+              ProxyPass / http://127.0.0.1:8080/
+              ProxyPassReverse / http://127.0.0.1:8080/
 
               RequestHeader set X-Forwarded-Proto "https"
 
