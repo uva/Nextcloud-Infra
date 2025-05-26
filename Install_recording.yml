@@ -9,19 +9,19 @@
 
   tasks:
 
-    - name: Download en extract Firefox naar /opt
-      ansible.builtin.command:  
-        cmd: 'wget -O firefox.tar.xz https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US'
-        chdir: /opt
-      args:
-        creates: /opt/firefox
+    - name: Download Firefox
+      ansible.builtin.get_url:
+        url: "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-US"
+        dest: /opt/firefox.tar.xz
+        mode: '0644'
       become: yes
 
     - name: Extract Firefox
-      unarchive:
+      ansible.builtin.unarchive:
         src: /opt/firefox.tar.xz
         dest: /opt
         remote_src: yes
+      become: yes
 
     - name: Maak een symlink voor Firefox
       ansible.builtin.file:
@@ -30,94 +30,71 @@
         state: link
       become: yes
 
-    - name: Installeer benodigde GTK bibliotheken
-      apt:
+    - name: Installeer benodigde pakketten
+      ansible.builtin.apt:
         update_cache: yes
         name:
           - libgtk-3-0
           - libdbus-glib-1-2
+          - libpulse0
+          - pulseaudio
+          - xvfb
+          - ffmpeg
+          - python3.10-venv
       become: yes
 
-    - name: Download en extract Geckodriver naar /usr/local/bin
-      ansible.builtin.command:
-        cmd: 'wget https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz'
-        chdir: /usr/local/bin
-      args:
-        creates: /usr/local/bin/geckodriver
+    - name: Download Geckodriver
+      ansible.builtin.get_url:
+        url: "https://github.com/mozilla/geckodriver/releases/download/v0.36.0/geckodriver-v0.36.0-linux64.tar.gz"
+        dest: /tmp/geckodriver.tar.gz
+        mode: '0644'
       become: yes
 
     - name: Extract Geckodriver
-      unarchive:
-        src: /usr/local/bin/geckodriver-v0.36.0-linux64.tar.gz
+      ansible.builtin.unarchive:
+        src: /tmp/geckodriver.tar.gz
         dest: /usr/local/bin
         remote_src: yes
+      become: yes
 
     - name: Maak Geckodriver executable
-      file:
+      ansible.builtin.file:
         path: /usr/local/bin/geckodriver
         mode: '0755'
       become: yes
 
     - name: Verwijder Geckodriver tar.gz
       ansible.builtin.file:
-        path: /usr/local/bin/geckodriver-v0.36.0-linux64.tar.gz
+        path: /tmp/geckodriver.tar.gz
         state: absent
-      become: yes
-
-    - name: Installeer python3.10-venv
-      apt:
-        update_cache: yes
-        name: python3.10-venv
-      become: yes
-
-    - name: Installeer libpulse0
-      apt:
-        update_cache: yes
-        name: libpulse0
-      become: yes
-
-    - name: Installeer pulseaudio
-      apt:
-        update_cache: yes
-        name: pulseaudio
-      become: yes
-
-    - name: Installeer xvfb
-      apt:
-        update_cache: yes
-        name: xvfb
-      become: yes
-
-    - name: Installeer ffmpeg
-      apt:
-        update_cache: yes
-        name: ffmpeg
       become: yes
 
     - name: Maak de map recording aan
       ansible.builtin.file:
         path: /home/ubuntu/recording
         state: directory
+        mode: '0755'
+        owner: ubuntu
+        group: ubuntu
       become: yes
-    
+
     - name: Clone nextcloud-talk-recording repository
       ansible.builtin.git:
         repo: https://github.com/nextcloud/nextcloud-talk-recording.git
         dest: /home/ubuntu/recording/nextcloud-talk-recording
       become: yes
 
-    - name: Installeer een virtuele omgeving in map recording
+    - name: Maak virtuele omgeving in recording-map
       ansible.builtin.command:
         cmd: python3 -m venv venv
         chdir: /home/ubuntu/recording
+        creates: /home/ubuntu/recording/venv
       become: yes
 
-    - name: Activeer de virtuele omgeving en installeer nextcloud-talk-recording
-      ansible.builtin.shell: |
-        source /home/ubuntu/recording/venv/bin/activate
-        pip install file:///home/ubuntu/recording/nextcloud-talk-recording
-      args:
-        executable: /bin/bash
+    - name: Installeer nextcloud-talk-recording in virtualenv
+      ansible.builtin.pip:
+        name: file:///home/ubuntu/recording/nextcloud-talk-recording
+        virtualenv: /home/ubuntu/recording/venv
       become: yes
 
     - name: Maak de server.conf aan
@@ -154,8 +131,12 @@
           browser = firefox
           [stats]
           allowed_ips =
+      owner: ubuntu
+      group: ubuntu
+      mode: '0644'
+      become: yes
 
-    - name: Laat de service altijd draaien
+    - name: Start recording via nohup
       ansible.builtin.shell: |
         source /home/ubuntu/recording/venv/bin/activate
         nohup python3 -m nextcloud.talk.recording > /home/ubuntu/recording/output.log 2>&1 &
