@@ -128,6 +128,6 @@
     - name: Start recording via nohup
       ansible.builtin.shell: |
         source /home/ubuntu/recording/venv/bin/activate
-        nohup python3 -m nextcloud.talk.recording /home/ubuntu/recording/server.conf > /home/ubuntu/recording/output.log 2>&1 &
+        nohup python3 -m nextcloud.talk.recording -c /home/ubuntu/recording/server.conf > /home/ubuntu/recording/output.log 2>&1 &
       args:
         executable: /bin/bash
