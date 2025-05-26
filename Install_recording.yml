@@ -1,4 +1,3 @@
----
 - name: Playbook om Firefox, Geckodriver en andere tools te installeren
   hosts: localhost
   become: yes
