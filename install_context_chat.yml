@@ -1,8 +1,9 @@
+---
 - name: Install and configure Go, Docker, NATS, Janus, and Signaling Server
   hosts: localhost
   connection: local
   become: true
-    
+
   tasks:
 
     - name: Installeer python3-pip als dat nog niet aanwezig is
@@ -43,7 +44,8 @@
       git:
         repo: https://github.com/nextcloud/context_chat_backend.git
         dest: /opt/context_chat_backend
-        version: main
+        #version: master  # Pas aan als de branch anders heet, of laat weg om default te gebruiken
+        force: yes       # force checkout
 
     - name: Kopieer voorbeeld .env naar .env
       copy:
@@ -102,4 +104,3 @@
         volumes:
           - /opt/context_chat_backend/persistent_storage:/app/persistent_storage
         state: started
-
