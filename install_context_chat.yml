@@ -21,3 +21,85 @@
         name: docker.io
         state: present
         update_cache: yes
+
+    - name: Haal de laatste Docker Buildx versie op
+      shell: |
+        curl -s https://api.github.com/repos/docker/buildx/releases/latest | grep tag_name | cut -d '"' -f4
+      register: buildx_version
+
+    - name: Maak Docker CLI plugins directory aan
+      file:
+        path: "{{ ansible_env.HOME }}/.docker/cli-plugins"
+        state: directory
+        mode: '0755'
+
+    - name: Download Docker Buildx binary
+      get_url:
+        url: "https://github.com/docker/buildx/releases/download/{{ buildx_version.stdout }}/buildx-{{ buildx_version.stdout }}.linux-amd64"
+        dest: "{{ ansible_env.HOME }}/.docker/cli-plugins/docker-buildx"
+        mode: '0755'
+
+    - name: Clone context_chat_backend repository
+      git:
+        repo: https://github.com/nextcloud/context_chat_backend.git
+        dest: /opt/context_chat_backend
+        version: main
+
+    - name: Kopieer voorbeeld .env naar .env
+      copy:
+        src: /opt/context_chat_backend/example.env
+        dest: /opt/context_chat_backend/.env
+        remote_src: yes
+
+    - name: Overschrijf .env met vaste inhoud
+      copy:
+        dest: /opt/context_chat_backend/.env
+        content: |
+          # SPDX-FileCopyrightText: 2023 Nextcloud GmbH and Nextcloud contributors
+          # SPDX-License-Identifier: AGPL-3.0-or-later
+          #
+          # rename this file to .env
+
+          # Persistent files directory
+          # SENTENCE_TRANSFORMERS_HOME=persistent_storage/model_files
+          # HF_HOME=persistent_storage/model_files
+          # VECTORDB_DIR=persistent_storage/vector_db_data
+          # CC_CONFIG_PATH=persistent_storage/config.yaml
+          # EM_SERVER_LOG_PATH=persistent_storage/logs
+
+          # Huggingface offline mode
+          #TRANSFORMERS_OFFLINE=1
+
+          # AppAPI headers
+          AA_VERSION=3.0.0
+          APP_SECRET=12345
+          APP_ID=context_chat_backend
+          APP_DISPLAY_NAME=Context Chat Backend
+          APP_VERSION=4.3.0
+          APP_HOST=0.0.0.0
+          APP_PORT=10034
+          APP_PERSISTENT_STORAGE=persistent_storage
+          NEXTCLOUD_URL=https://nextcloud01.hvanextcloudpoc.src.surf-hosted.nl
+
+          # CUDA Support
+          #NVIDIA_VISIBLE_DEVICES=all
+          #NVIDIA_DRIVER_CAPABILITIES=compute
+
+    - name: Bouw Docker image voor context_chat_backend
+      shell: |
+        DOCKER_BUILDKIT=1 docker build -t context_chat_backend:latest .
+      args:
+        chdir: /opt/context_chat_backend
+
+    - name: Start context_chat_backend container
+      docker_container:
+        name: context_chat_backend
+        image: context_chat_backend:latest
+        restart_policy: unless-stopped
+        env_file: /opt/context_chat_backend/.env
+        published_ports:
+          - "10034:10034"
+        volumes:
+          - /opt/context_chat_backend/persistent_storage:/app/persistent_storage
+        state: started
+
