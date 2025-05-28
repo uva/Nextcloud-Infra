@@ -1,11 +1,11 @@
-vars:
-    domein_nextcloud: "{{ nextcloud_domain }}"
-    secret: "{{ secret }}"
-
 - name: Install and configure Go, Docker, NATS, Janus, and Signaling Server
   hosts: localhost
   connection: local
   become: true
+
+  vars:
+    domein_nextcloud: "{{ nextcloud_domain }}"
+    secret: "{{ secret }}"
 
   tasks:
 
@@ -47,8 +47,7 @@ vars:
       git:
         repo: https://github.com/nextcloud/context_chat_backend.git
         dest: /opt/context_chat_backend
-        #version: master  # Pas aan als de branch anders heet, of laat weg om default te gebruiken
-        force: yes       # force checkout
+        force: yes
 
     - name: Kopieer voorbeeld .env naar .env
       copy:
