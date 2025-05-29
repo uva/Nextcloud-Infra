@@ -1,0 +1,233 @@
+- name: Voeg lokale host toe aan nextcloud groep
+  hosts: localhost
+  gather_facts: yes
+  tasks:
+    - name: Haal IP-adres op van huidige server
+      debug:
+        var: ansible_default_ipv4.address
+
+    - name: Voeg IP-adres toe aan 'nextcloud' groep
+      add_host:
+        name: "{{ ansible_default_ipv4.address }}"
+        groups: nextcloud
+        ansible_user: "{{ ansible_user }}"
+        
+- name: Setup Whiteboard server with Docker Compose v2, HTTPS/WSS, WebSocket fix, and healthcheck
+  hosts: whiteboard
+  become: true
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - jq
+          - netcat
+        state: present
+
+    - name: Add NodeSource Node.js 20.x repository
+      shell: curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      args:
+        executable: /bin/bash
+
+    - name: Install Node.js and npm (from NodeSource)
+      apt:
+        name:
+          - nodejs
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Install Docker and Docker Compose v2
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Ensure Docker Compose v2 plugin is present
+      command: docker compose version
+      register: docker_compose_version
+      failed_when: docker_compose_version.rc != 0
+
+    - name: Clone Whiteboard repository (force overwrite)
+      git:
+        repo: https://github.com/nextcloud/whiteboard.git
+        dest: /opt/whiteboard
+        version: main
+        force: yes
+
+    - name: Install npm packages (including dotenv)
+      command: npm install
+      args:
+        chdir: /opt/whiteboard
+
+    - name: Create updated .env file for Whiteboard (matching Docker expectations)
+      copy:
+        dest: /opt/whiteboard/.env
+        content: |
+          NEXTCLOUD_URL={{ nc_url }}
+          NEXTCLOUD_USER={{ nc_user }}
+          NEXTCLOUD_PASSWORD={{ nc_password }}
+          JWT_SECRET_KEY={{ jwt_secret }}
+          FORCE_HTTPS=true
+          TRUST_PROXY=true
+          PORT=3002
+
+    - name: Update docker-compose.yml to use env_file
+      copy:
+        dest: /opt/whiteboard/docker-compose.yml
+        content: |
+          version: '3.7'
+          services:
+            nextcloud-whiteboard-server:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              ports:
+                - 3002:3002
+              env_file:
+                - .env
+
+    - name: Run Docker Compose up
+      command: docker compose up -d
+      args:
+        chdir: /opt/whiteboard
+
+    - name: Install Nginx and Certbot
+      apt:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Ensure nginx.conf has map for connection_upgrade
+      blockinfile:
+        path: /etc/nginx/nginx.conf
+        block: |
+          map $http_upgrade $connection_upgrade {
+              default upgrade;
+              ''      close;
+          }
+        insertafter: '^http {'
+        marker: "# {mark} ANSIBLE MANAGED CONNECTION UPGRADE MAP"
+
+    - name: Temporary Nginx HTTP config for certificate request
+      copy:
+        dest: /etc/nginx/sites-available/whiteboard
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain }};
+
+              location / {
+                  proxy_pass http://localhost:3002;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Port 80;
+              }
+          }
+
+    - name: Enable Nginx site and disable default
+      file:
+        src: /etc/nginx/sites-available/whiteboard
+        dest: /etc/nginx/sites-enabled/whiteboard
+        state: link
+        force: true
+
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Test Nginx configuration
+      command: nginx -t
+
+    - name: Reload Nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Obtain Let’s Encrypt certificate
+      command: >
+        certbot --nginx -d {{ domain }} --non-interactive --agree-tos -m {{ email }}
+
+    - name: Replace Nginx config with SSL, WebSocket fix, and healthcheck support
+      copy:
+        dest: /etc/nginx/sites-available/whiteboard
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain }};
+              location / {
+                  return 301 https://$host$request_uri;
+              }
+          }
+
+          server {
+              listen 443 ssl;
+              server_name {{ domain }};
+
+              ssl_certificate /etc/letsencrypt/live/{{ domain }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/{{ domain }}/privkey.pem;
+
+              location / {
+                  proxy_pass http://localhost:3002;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header X-Forwarded-Port 443;
+                  proxy_read_timeout 86400;
+              }
+          }
+
+    - name: Test final Nginx configuration
+      command: nginx -t
+
+    - name: Reload Nginx with final SSL config
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Restart Docker Compose services
+      command: docker compose restart
+      args:
+        chdir: /opt/whiteboard
+
+    - name: Check if backend port 3002 is open
+      command: nc -zv localhost 3002
+      register: portcheck_result
+      failed_when: portcheck_result.rc != 0
+
+    - name: Show port 3002 check result
+      debug:
+        var: portcheck_result
