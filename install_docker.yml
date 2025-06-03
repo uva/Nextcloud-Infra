@@ -1,0 +1,23 @@
+- name: Install  Docker
+  hosts: localhost
+  connection: local
+  become: true
+    
+  tasks:
+
+    - name: Installeer python3-pip als dat nog niet aanwezig is
+      apt:
+        name: python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Install Docker SDK for Python
+      pip:
+        name: docker
+        executable: pip3
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
