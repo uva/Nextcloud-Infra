@@ -45,7 +45,7 @@
         state: directory
         owner: root
         group: root
-        mode: '0777'  # WORLD WRITABLE (alleen binnen container gebruikt)
+        mode: '0777'
 
     - name: Start of update Collabora container
       docker_container:
@@ -63,7 +63,10 @@
           domain: "{{ collabora_domain | regex_replace('\\.', '\\\\.') }}"
           username: "{{ collabora_username }}"
           password: "{{ collabora_password }}"
-          extra_params: --o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.host[0]={{ collabora_domain }}
+        command: >
+          --o:ssl.enable=false
+          --o:ssl.termination=true
+          --o:storage.wopi.host[0]={{ collabora_domain }}
 
     - name: Maak tijdelijke Nginx-configuratie voor Certbot
       copy:
