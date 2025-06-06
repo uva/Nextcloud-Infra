@@ -128,7 +128,7 @@
 
     - name: Zet juiste rechten
       file:
-        path: {{ nextcloud_datafolder }}
+        path: "{{ nextcloud_datafolder }}"
         owner: www-data
         group: www-data
         recurse: yes
