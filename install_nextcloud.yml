@@ -212,6 +212,15 @@
         creates: /var/www/nextcloud/config/config.php
         chdir: /var/www/nextcloud
 
+    - name: Wacht tot Nextcloud config:system commando beschikbaar is
+      shell: sudo -u www-data php /var/www/nextcloud/occ list
+      register: occ_list_output
+      retries: 5
+      delay: 10
+      until: "'config:system' in occ_list_output.stdout"
+      args:
+        chdir: /var/www/nextcloud
+
     - name: Voeg domein toe aan trusted_domains
       shell: >
         sudo -u www-data php /var/www/nextcloud/occ config:system:set trusted_domains 1
